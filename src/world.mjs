@@ -184,10 +184,10 @@ export class World {
     this.mainComp = best
     this.gScore = new Float32Array(W * Hn); this.gStamp = new Int32Array(W * Hn); this.parent = new Int32Array(W * Hn)
     this.closed = new Int32Array(W * Hn); this.stamp = 0
+    this.heap = new Int32Array(W * Hn * 2); this.heapF = new Float32Array(W * Hn * 2)
     // touch every page of the search arrays now, so the first search of the match does not pay for it
     for (const a of [this.gScore, this.gStamp, this.parent, this.closed, this.heap, this.heapF]) a.fill(1), a.fill(0)
     this.deadline = Infinity // decision-time guard for path searches (set by the caller)
-    this.heap = new Int32Array(W * Hn * 2); this.heapF = new Float32Array(W * Hn * 2)
   }
 
   cellOfNode(a) { const I = a % this.gw, J = (a / this.gw) | 0; return 2 * J * this.nx + 2 * I }

@@ -23,6 +23,8 @@ const GAMES = +opt("games", 1)
 const NAME = opt("name", "sparsh")
 const HOST = opt("host", "play.joinbuilders.org")
 const extraEnv = Object.fromEntries(args.flatMap((a, i) => (args[i - 1] === "--env" ? [a.split("=")] : [])))
+let VER = "?"
+try { VER = (await import("node:child_process")).execSync("git rev-parse --short HEAD", { cwd: here }).toString().trim() + ((await import("node:child_process")).execSync("git status --porcelain src", { cwd: here }).toString().trim() ? "+" : "") } catch {}
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 async function pickRoom() {
@@ -49,7 +51,7 @@ function playOne() {
       done = true
       try { bot?.stdin.end() } catch {}
       try { ws.close() } catch {}
-      const rec = { at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
+      const rec = { at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, ver: VER, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
       appendFileSync(join(here, "ghost-log.jsonl"), JSON.stringify(rec) + "\n")
       log("done", JSON.stringify(rec))
       resolve(rec)

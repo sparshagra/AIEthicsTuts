@@ -68,7 +68,7 @@ export class Brain {
           if (tr) { tr.hurtMe += ev.amount; tr.hurtT = t }
           else if (!o.mechs.some((m) => m.id === ev.by)) { this.lookAt = ev.bearing; this.lookUntil = t + 1.4 }
         }
-      } else if (ev.type === "hit") { this.dealtT = t; this.dealtLog = (this.dealtLog || "") + `${ev.weapon[0]}${ev.target >= 1000 ? "c" : ev.target >= 100 ? "n" : ""}${ev.amount | 0},`; const tr = this.tracks.get(ev.target); if (tr) tr.hitT = t }
+      } else if (ev.type === "hit") { this.dealtT = t; if (ev.weapon === "gun" && ev.target < 16) this.gunHits = (this.gunHits || 0) + 1; if (ev.weapon === "laser" && ev.target < 16) this.laserHits = (this.laserHits || 0) + 1; this.dealtLog = (this.dealtLog || "") + `${ev.weapon[0]}${ev.target >= 1000 ? "c" : ev.target >= 100 ? "n" : ""}${ev.amount | 0},`; const tr = this.tracks.get(ev.target); if (tr) tr.hitT = t }
       else if (ev.type === "took" || ev.type === "take_failed") this.items.delete(ev.id)
     }
     while (this.hurtLog.length && this.hurtLog[0].t < t - 8) this.hurtLog.shift()
@@ -165,8 +165,11 @@ export class Brain {
     const mechHurt = recentHurt.filter((h) => h.by != null && h.by < 16)
     this.attackers = new Set(mechHurt.map((h) => h.by))
 
-    // weapons
+    // weapons (and a shot count from the gun's ammo, for the accuracy log)
     const ws = me.weapons
+    const g0 = ws.find((w) => w && w.kind === "gun")
+    if (g0 && this.prevAmmo != null && g0.ammo < this.prevAmmo && this.target != null) this.gunShots = (this.gunShots || 0) + (this.prevAmmo - g0.ammo)
+    this.prevAmmo = g0 ? g0.ammo : null
     this.laserSlot = ws.findIndex((w) => w && w.kind === "laser")
     this.lightSlot = ws.findIndex((w) => w && w.kind === "lightning")
     this.gunSlot = ws.findIndex((w) => w && w.kind === "gun")
@@ -252,7 +255,7 @@ export class Brain {
     if (process.env.SPARSH_DEBUG) act.debug = { label: `${this.mode[0]} ${this.label}` }
     if (process.env.SPARSH_TRACE && o.tick % 20 === 0) {
       const ev = this.hurtLog.filter((h) => t - h.t < 1).map((h) => `${h.weapon}:${h.by}:${h.amount | 0}${h.rear ? "R" : ""}`).join(",")
-      process.stderr.write(`T ${t.toFixed(1)} ${this.mode[0]} hp=${me.hp | 0}/${me.max_hp | 0} e=${me.energy | 0} c=${me.cubes} pos=${me.pos.map((v) => v | 0)} ${this.label} tgt=${tgt ? `${tgt.id}@${d2(tgt.pos, me.pos) | 0}/${tgt.hp | 0}${this.losTo(tgt) ? "L" : ""}` : "-"} vis=${enemies.length} w=${ws.map((w) => (w ? w.kind.slice(0, 2) + (w.ammo ?? "") + (w.charge ? "c" + w.charge.toFixed(1) : "") + (w.cooldown > 0 ? "k" + w.cooldown.toFixed(1) : "") : "_")).join("/")} fire=${act.fire.map(Number).join("")} hurt=[${ev}] hit=[${this.dealtLog || ""}] alive=${o.alive} zr=${zoneNow.r | 0}\n`)
+      process.stderr.write(`T ${t.toFixed(1)} ${this.mode[0]} hp=${me.hp | 0}/${me.max_hp | 0} e=${me.energy | 0} c=${me.cubes} pos=${me.pos.map((v) => v | 0)} ${this.label} tgt=${tgt ? `${tgt.id}@${d2(tgt.pos, me.pos) | 0}/${tgt.hp | 0}${this.losTo(tgt) ? "L" : ""}` : "-"} vis=${enemies.length} w=${ws.map((w) => (w ? w.kind.slice(0, 2) + (w.ammo ?? "") + (w.charge ? "c" + w.charge.toFixed(1) : "") + (w.cooldown > 0 ? "k" + w.cooldown.toFixed(1) : "") : "_")).join("/")} fire=${act.fire.map(Number).join("")} hurt=[${ev}] hit=[${this.dealtLog || ""}] acc=${this.gunHits || 0}/${this.gunShots || 0} lz=${this.laserHits || 0} alive=${o.alive} zr=${zoneNow.r | 0}\n`)
       this.dealtLog = ""
     }
     return act
