@@ -1,11 +1,14 @@
-# The match runs it with no network, a read-only root (writable /tmp), 1 CPU, 512 MB, and the map at /arena.
-FROM golang:1.23-bookworm AS build
+FROM golang:1.26.1-bookworm AS build
 WORKDIR /src
 COPY go.mod ./
-COPY pilot.go strategy.go terrain.go ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /pilot .
+COPY cmd/mechbot ./cmd/mechbot
+COPY internal/bot ./internal/bot
+COPY internal/proto ./internal/proto
+COPY internal/world ./internal/world
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=mod GOTOOLCHAIN=local
+RUN go build -trimpath -ldflags="-s -w" -o /out/mechbot ./cmd/mechbot
 
 FROM scratch
-COPY --from=build /pilot /pilot
-COPY arena /arena
-ENTRYPOINT ["/pilot"]
+COPY --from=build /out/mechbot /mechbot
+USER 65534:65534
+ENTRYPOINT ["/mechbot"]
