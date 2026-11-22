@@ -1,4 +1,4 @@
-AIEthicsTuts - Mech Royale entry by Sparsh (Team 4141), Builders Buildathon.
+AIEthicsTuts - an arena bot by Sparsh (Team 4141).
 
 All code in this repository (pilot.go, strategy.go, terrain.go, tools/ghost.mjs) is
 Copyright (c) 2026 Sparsh (Team 4141) and is MIT licensed, see LICENSE.

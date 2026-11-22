@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Sparsh (Team 4141). Original work, see LICENSE and NOTICE.
 //
-// Ghost-mode bridge: plays our bot in live public matches on play.joinbuilders.org (real engine, real
+// Ghost-mode bridge: plays our bot in live public matches on the game's public site (pass --host; real engine, real
 // players, bots in the empty seats). The site speaks the same hello/obs/action messages over a WebSocket.
 //
-//   node --experimental-websocket tools/ghost.mjs --arena PATH/TO/kit/arena [--games 3] [--cmd "python -u bot.py"] [--env K=V]
+//   node --experimental-websocket tools/ghost.mjs --arena PATH/TO/kit/arena --host HOST [--games 3] [--cmd "python -u bot.py"] [--env K=V]
 //
 // One JSON line per finished match is appended to tools/ghost-log.jsonl.
 
@@ -23,7 +23,8 @@ const FULL = args.includes("--full")
 // a fresh random name per run, so nothing in a public room points back at us
 const WORDS = ["toaster", "skill_issue", "bonk", "lag_spike", "touchgrass", "ratio", "npc_energy", "goofy", "copium", "sus_robot", "yeet", "bruh"]
 const NAME = opt("name", null) ?? `${WORDS[randomBytes(1)[0] % WORDS.length]}${100 + (randomBytes(2).readUInt16LE() % 900)}`
-const HOST = opt("host", "play.joinbuilders.org")
+const HOST = opt("host", process.env.GHOST_HOST)
+if (!HOST) { console.error("pass --host HOST (or set GHOST_HOST)"); process.exit(2) }
 const extraEnv = Object.fromEntries(args.flatMap((a, i) => (args[i - 1] === "--env" ? [a.split("=")] : [])))
 let VER = "?"
 VER = opt("tag", "?")
