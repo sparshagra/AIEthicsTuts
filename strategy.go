@@ -1288,6 +1288,20 @@ func (b *Agent) pickLoot(o *Obs, hpRatio float64, busy bool) *lootPick {
 		}
 	}
 
+	// Practice only: an uncontested supply drop is 3 cubes plus full HP and energy. Leave for it so we
+	// arrive about when it lands, and skip one another mech is already capturing.
+	if b.pracOn && !busy {
+		walk := get(me.Stats, "walk_speed", 11.7)
+		for _, d := range o.Drops {
+			if len(d.Pos) < 2 || d.Holder != nil && *d.Holder != me.ID {
+				continue
+			}
+			if eta := hyp(d.Pos[0]-x, d.Pos[1]-y) * 1.4 / walk; d.LandsIn <= eta+3 {
+				consider("drop", d.ID, vec3(d.Pos), 300)
+			}
+		}
+	}
+
 	if best == nil {
 		b.lootID = -1
 		return nil
@@ -1790,6 +1804,16 @@ func (b *Agent) decide(o *Obs, act *Action) {
 				}
 				aimPt = &c
 			} else {
+				mx, my = b.goTo(me, lp.pos[0], lp.pos[1])
+			}
+		case "drop":
+			r := 8.0
+			for _, d := range o.Drops {
+				if d.ID == lp.id && d.Radius > 0 {
+					r = d.Radius
+				}
+			}
+			if hyp(lp.pos[0]-x, lp.pos[1]-y) > r-2.5 {
 				mx, my = b.goTo(me, lp.pos[0], lp.pos[1])
 			}
 		default:

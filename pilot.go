@@ -230,7 +230,11 @@ type Offer struct {
 }
 
 type Drop struct {
-	Pos []float64 `json:"pos"`
+	ID      int       `json:"id"`
+	Pos     []float64 `json:"pos"`
+	Radius  float64   `json:"radius"`
+	LandsIn float64   `json:"lands_in"`
+	Holder  *int      `json:"holder"`
 }
 
 type Sound struct {
