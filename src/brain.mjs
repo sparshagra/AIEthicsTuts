@@ -63,7 +63,7 @@ export class Brain {
       if (ev.type === "kill") this.kills++
       else if (ev.type === "damaged") {
         this.hurtLog.push({ t, by: ev.by, amount: ev.amount, bearing: ev.bearing, weapon: ev.weapon, rear: ev.rear })
-        if (ev.by != null && ev.by < 16 && ev.bearing != null) {
+        if (ev.by != null && ev.bearing != null) {
           const tr = this.tracks.get(ev.by)
           if (tr) { tr.hurtMe += ev.amount; tr.hurtT = t }
           else if (!o.mechs.some((m) => m.id === ev.by)) { this.lookAt = ev.bearing; this.lookUntil = t + 1.4 }
@@ -239,15 +239,20 @@ export class Brain {
     } else this.unstick(mv, act)
     act.move = [+mv[0].toFixed(3), +mv[1].toFixed(3)]
 
-    // ---- aim and triggers
-    this.aimAndFire(act, tgt, npcs, enemies, fight)
+    // ---- aim and triggers: a drone shooting us gets shot back unless a mech is in our sights
+    let aimTgt = tgt
+    if (!tgt || !this.losTo(tgt) || d2(tgt.pos, me.pos) > 200) {
+      const npcAtt = this.hurtLog.filter((h) => h.by != null && h.by >= 100 && t - h.t < 4).map((h) => this.tracks.get(h.by)).find((n) => n && n.fresh)
+      if (npcAtt) { aimTgt = null; this.farm = { kind: "npc", id: npcAtt.id, pos: npcAtt.pos, hp: npcAtt.hp } }
+    }
+    this.aimAndFire(act, aimTgt, npcs, enemies, fight)
     this.manageLoot(act)
     if (this.gunSlot >= 0) { const g = ws[this.gunSlot]; if (g.ammo !== undefined && g.ammo < g.stats.mag * 0.5 && g.reload === 0 && !tgt && !act.fire[this.gunSlot] && !this.farm) act.reload = true }
     this.prevHp = me.hp
     if (process.env.SPARSH_DEBUG) act.debug = { label: `${this.mode[0]} ${this.label}` }
     if (process.env.SPARSH_TRACE && o.tick % 20 === 0) {
       const ev = this.hurtLog.filter((h) => t - h.t < 1).map((h) => `${h.weapon}:${h.by}:${h.amount | 0}${h.rear ? "R" : ""}`).join(",")
-      process.stderr.write(`T ${t.toFixed(1)} ${this.mode[0]} hp=${me.hp | 0}/${me.max_hp | 0} e=${me.energy | 0} c=${me.cubes} pos=${me.pos.map((v) => v | 0)} ${this.label} tgt=${tgt ? `${tgt.id}@${d2(tgt.pos, me.pos) | 0}/${tgt.hp | 0}${this.losTo(tgt) ? "L" : ""}` : "-"} vis=${enemies.length} w=${ws.map((w) => (w ? w.kind[0] + (w.ammo ?? "") : "_")).join("")} fire=${act.fire.map(Number).join("")} hurt=[${ev}] hit=[${this.dealtLog || ""}] alive=${o.alive} zr=${zoneNow.r | 0}\n`)
+      process.stderr.write(`T ${t.toFixed(1)} ${this.mode[0]} hp=${me.hp | 0}/${me.max_hp | 0} e=${me.energy | 0} c=${me.cubes} pos=${me.pos.map((v) => v | 0)} ${this.label} tgt=${tgt ? `${tgt.id}@${d2(tgt.pos, me.pos) | 0}/${tgt.hp | 0}${this.losTo(tgt) ? "L" : ""}` : "-"} vis=${enemies.length} w=${ws.map((w) => (w ? w.kind.slice(0, 2) + (w.ammo ?? "") + (w.charge ? "c" + w.charge.toFixed(1) : "") + (w.cooldown > 0 ? "k" + w.cooldown.toFixed(1) : "") : "_")).join("/")} fire=${act.fire.map(Number).join("")} hurt=[${ev}] hit=[${this.dealtLog || ""}] alive=${o.alive} zr=${zoneNow.r | 0}\n`)
       this.dealtLog = ""
     }
     return act
@@ -312,7 +317,9 @@ export class Brain {
       const cov = this.findCover([e])
       if (cov && d2(cov, me.pos) < P.coverMax) return { retreat: cov, label: "lasercover" }
     }
-    if (this.retreating && !finishing) {
+    const arcR = 45 * 1.2 + 12
+    const lightNear = near.some((x) => x.weapons.includes("lightning") && d2(x.pos, me.pos) < arcR)
+    if (this.retreating && !finishing && !lightNear) {
       const cov = this.findCover(near.length ? near : [e])
       if (cov) return { retreat: cov, label: "cover" }
       // no cover close: fight it out, facing them
@@ -322,7 +329,7 @@ export class Brain {
     if (hasLaser) { lo = P.laserBand[0]; hi = P.laserBand[1] }
     else if (this.lightSlot >= 0 && this.gunSlot < 0) { lo = 12; hi = 30 }
     else { lo = P.gunBand[0]; hi = P.gunBand[1] }
-    if (theyLight && !hasLaser) lo = Math.max(lo, 60) // stay out of arc range
+    if (theyLight) lo = Math.max(lo, arcR) // stay out of arc range (lightning also shorts a charging laser)
     if (!this.losTo(e) && d < hi + 60 && !ffa) hi = Math.min(hi, d - 10) // no line: close in to find one
     if (shooting >= 2 || near.length >= 3) { lo += 20; hi += 30 }
     // movement: radial to hold the band, strafe across their line of fire
@@ -335,7 +342,8 @@ export class Brain {
     let mv = [Math.cos(ang) * radial + Math.cos(ang + Math.PI / 2) * this.strafe * sp, Math.sin(ang) * radial + Math.sin(ang + Math.PI / 2) * this.strafe * sp]
     // keep the strafe walkable and inside the zone
     mv = this.safeDir(mv)
-    const boost = (d < lo * 0.6 || (theyLight && d < 55)) && me.energy > 30
+    if (theyLight && d < arcR && !(this.lightSlot >= 0 && hpF > 0.5)) { mv = this.safeDir([-Math.cos(ang), -Math.sin(ang)]); radial = -1 }
+    const boost = (d < lo * 0.6 && me.energy > 30) || (theyLight && d < arcR && me.energy > 8)
     return { move: mv, boost, label: `fight ${e.id} ${d | 0}m` }
   }
 
@@ -441,7 +449,16 @@ export class Brain {
     const me = this.me, z = this.o.zone
     if (safeHere >= 999) return false
     const dIn = Math.max(0, d2(me.pos, z.next_center) - z.next_radius * 0.85)
-    const need = dIn / (this.walkSpeed() * 0.8) + P.zoneSlack
+    // walls make the walk longer than the straight line: check the real path now and then
+    if (dIn > 0 && (this.t - (this.zpT ?? -99) > 4 || !this.zpLen)) {
+      const g = this.zoneGoal()
+      const p = this.w.path(me.pos[0], me.pos[1], g[0], g[1], 12000)
+      let L = 0, prev = me.pos
+      if (p) for (const q of p) { L += d2(prev, q); prev = q }
+      this.zpLen = p && !p.partial ? L : dIn * 1.6; this.zpT = this.t
+    }
+    const est = dIn > 0 ? Math.max(dIn * 1.15, this.zpLen || 0) : 0
+    const need = est / (this.walkSpeed() * 0.8) + P.zoneSlack
     return safeHere < need
   }
 
@@ -645,7 +662,7 @@ export class Brain {
           const release = (ready && line && err < tol * 1.2 && d < laser.stats.range) || (late && line)
           act.fire[this.laserSlot] = !release
           if (late && !line) act.fire[this.laserSlot] = false // fires anyway on its own, keep it pointed
-        } else if (okUse && laser.cooldown <= 0.12 && d < laser.stats.range - 10 && (line || d < 120)) {
+        } else if (okUse && !enemies.some((x) => x.weapons.includes("lightning") && d2(x.pos, me.pos) < 60) && laser.cooldown <= 0.12 && d < laser.stats.range - 10 && (line || d < 120)) {
           act.fire[this.laserSlot] = true
         }
       }
@@ -695,7 +712,10 @@ export class Brain {
     }
     const stale = !this.path || !this.pathGoal || d2(this.pathGoal, goal) > 6 || t - this.pathT > 3
     if (stale) {
-      this.path = w.path(pos[0], pos[1], goal[0], goal[1], P.maxExpand)
+      // walking outside the circle costs health: make the search pay for every node out there
+      const zn = this.zoneNow(t + 10), zr2 = (zn.r - 4) * (zn.r - 4), cx = zn.c[0], cy = zn.c[1]
+      const out = (a) => { const [x, y] = w.nodeXY(a); const dx = x - cx, dy = y - cy; return dx * dx + dy * dy > zr2 ? 8 : 0 }
+      this.path = w.path(pos[0], pos[1], goal[0], goal[1], P.maxExpand, out)
       this.pathGoal = goal; this.pathT = t
     }
     const p = this.path

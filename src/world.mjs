@@ -184,6 +184,7 @@ export class World {
     this.mainComp = best
     this.gScore = new Float32Array(W * Hn); this.gStamp = new Int32Array(W * Hn); this.parent = new Int32Array(W * Hn)
     this.closed = new Int32Array(W * Hn); this.stamp = 0
+    this.deadline = Infinity // decision-time guard for path searches (set by the caller)
     this.heap = new Int32Array(W * Hn * 2); this.heapF = new Float32Array(W * Hn * 2)
   }
 
@@ -266,6 +267,7 @@ export class World {
       const ha = h(a)
       if (ha < bestH) { bestH = ha; bestNode = a }
       if (++expanded > maxExpand) break
+      if ((expanded & 511) === 0 && performance.now() > this.deadline) break
       const ai = a % W, aj = (a / W) | 0, ga = g[a]
       for (let d = 0; d < 8; d++) {
         const bi = ai + DI[d], bj = aj + DJ[d]

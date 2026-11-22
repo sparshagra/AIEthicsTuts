@@ -43,7 +43,10 @@ function playOne() {
     const ws = new WebSocket(url)
     let bot = null, hello = null, lastObs = null, endMsg = null, results = null, labels = {}, obsN = 0, startT = Date.now()
     let mode = "?"
+    let done = false
     const finish = (why) => {
+      if (done) return
+      done = true
       try { bot?.stdin.end() } catch {}
       try { ws.close() } catch {}
       const rec = { at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }

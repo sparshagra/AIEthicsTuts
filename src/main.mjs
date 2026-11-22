@@ -50,6 +50,7 @@ function onHello(h) {
 
 function onObs(o) {
   let a
+  if (brain) brain.w.deadline = performance.now() + 30 // leave room inside the 50 ms budget
   try { a = brain ? brain.act(o) : blindAct(o) }
   catch (e) {
     log(`act failed at ${o.tick}: ${e.stack}`)
