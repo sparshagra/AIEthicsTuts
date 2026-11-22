@@ -19,6 +19,7 @@ const args = process.argv.slice(2)
 const opt = (k, d) => { const i = args.indexOf("--" + k); return i >= 0 ? args[i + 1] : d }
 const ARENA = opt("arena", process.env.ARENA || "/arena")
 const GAMES = +opt("games", 1)
+const FULL = args.includes("--full")
 // a fresh random name per run, so nothing in a public room points back at us
 const WORDS = ["toaster", "skill_issue", "bonk", "lag_spike", "touchgrass", "ratio", "npc_energy", "goofy", "copium", "sus_robot", "yeet", "bruh"]
 const NAME = opt("name", null) ?? `${WORDS[randomBytes(1)[0] % WORDS.length]}${100 + (randomBytes(2).readUInt16LE() % 900)}`
@@ -45,14 +46,14 @@ function playOne() {
     log("room", room)
     const ws = new WebSocket(url)
     let bot = null, hello = null, lastObs = null, endMsg = null, results = null, labels = {}, obsN = 0, startT = Date.now()
-    let mode = "?"
+    let mode = "?", TRACE = null
     let done = false
     const finish = (why) => {
       if (done) return
       done = true
       try { bot?.stdin.end() } catch {}
       try { ws.close() } catch {}
-      const rec = { valid: !!hello, at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, ver: VER, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
+      const rec = { valid: !!hello, at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, ver: VER, trace: TRACE, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
       appendFileSync(join(here, "ghost-log.jsonl"), JSON.stringify(rec) + "\n")
       log("done", JSON.stringify(rec))
       resolve(rec)
@@ -89,8 +90,10 @@ function playOne() {
         })
         mkdirSync(join(here, "traces"), { recursive: true })
         const tf = join(here, "traces", `${Date.now()}-r${room}.log`)
+        TRACE = tf.replace(/\.log$/, ".obs.jsonl")
         bot.stderr.on("data", (c) => appendFileSync(tf, c))
         const h2 = { ...m, map: { ...m.map, dir: ARENA } }
+        if (FULL) appendFileSync(TRACE.replace(".obs.jsonl", ".raw.jsonl"), JSON.stringify(h2) + "\n")
         bot.stdin.write(JSON.stringify(h2) + "\n")
         ws.send(JSON.stringify({ type: "loaded" }))
         log("hello slot", m.slot)
@@ -99,11 +102,13 @@ function playOne() {
       if (m.type === "obs") {
         lastObs = m; obsN++
         if (bot) bot.stdin.write(JSON.stringify(m) + "\n")
+        if (FULL && TRACE) appendFileSync(TRACE.replace(".obs.jsonl", ".raw.jsonl"), JSON.stringify(m) + "\n")
+        if (TRACE) appendFileSync(TRACE, JSON.stringify({ t: m.t, hp: Math.round(m.self.hp), alive: m.alive, cubes: m.self.cubes, pos: m.self.pos.map((v) => Math.round(v)), w: m.self.weapons.map((w) => w?.kind ?? null), zone: [m.zone.radius | 0, m.self.in_zone], mechs: (m.mechs || []).filter((x) => x.kind === "mech").map((x) => [x.id, Math.round(Math.hypot(x.pos[0] - m.self.pos[0], x.pos[1] - m.self.pos[1])), x.hp | 0, (x.weapons || []).join("/")]), ev: m.events?.length ? m.events : undefined }) + "\n")
         if (obsN % 300 === 0) log(`t=${m.t} alive=${m.alive} hp=${m.self.hp | 0} cubes=${m.self.cubes} w=${m.self.weapons.map((w) => w?.kind).join("/")}`)
         return
       }
       if (m.type === "end") { endMsg = m; log("END place", m.place, "kills", m.kills); setTimeout(() => finish("end"), 1500); return }
-      if (m.type === "results") { results = m; return }
+      if (m.type === "results") { results = m; if (TRACE) appendFileSync(TRACE, JSON.stringify({ results: m }) + "\n"); return }
     }
     let lastPhase = "", lastStart = 0
   })

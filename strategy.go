@@ -15,6 +15,8 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // Set MECH_DEBUG to anything non-empty to turn on the per-tick debug log.
@@ -312,6 +314,52 @@ type Agent struct {
 	trail [][2]float64
 	heard []heard
 	mode  string
+
+	zg    [2]float64 // held zone goal
+	zgKey [3]float64 // the next circle it was chosen for
+}
+
+// Ghost (free-for-all) retaliation window and the held zone goal. MECH_ARM overrides them for A/B
+// tests only, e.g. MECH_ARM="revenge=4,zonefix=0"; the match container never sets it.
+var (
+	armRevenge    = 12.0
+	armZoneFix    = 2.0
+	armDodgeAlign = true
+	armFFAOnly    = true
+	navRefresh    = 2.5
+)
+
+// ffaFix: the fixes above run once a free-for-all is detected; practice keeps the scored play.
+func (b *Agent) ffaFix() bool { return !armFFAOnly || b.notPractice }
+
+func (b *Agent) revenge() float64 {
+	if b.ffaFix() {
+		return armRevenge
+	}
+	return 4
+}
+
+func init() {
+	for _, kv := range strings.Split(os.Getenv("MECH_ARM"), ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			continue
+		}
+		switch k {
+		case "revenge":
+			armRevenge = f
+		case "zonefix":
+			armZoneFix = f
+		case "dodgealign":
+			armDodgeAlign = f != 0
+		case "ffaonly":
+			armFFAOnly = f != 0
+		}
+	}
 }
 
 func NewAgent(h *Hello) *Agent {
@@ -622,6 +670,42 @@ func (b *Agent) zoneGoal(z *Zone, x, y float64) (float64, float64) {
 	return c[0] + dx/d*lim, c[1] + dy/d*lim
 }
 
+// holdZoneGoal is zoneGoal made stable for path following. The nearest safe point slides as we walk,
+// and re-planning after every slide flips the A* route between the two ways round a building.
+// armZoneFix 1 holds one goal per circle; 2 also moves it to a walkable cell on the safe circle.
+func (b *Agent) holdZoneGoal(z *Zone, x, y float64) (float64, float64) {
+	zx, zy := b.zoneGoal(z, x, y)
+	if armZoneFix == 0 || !b.ffaFix() || hyp(zx-x, zy-y) <= 2 {
+		return zx, zy
+	}
+	key := [3]float64{z.NextCenter[0], z.NextCenter[1], z.NextRadius}
+	if b.zgKey == key && hyp(b.zg[0]-zx, b.zg[1]-zy) < 30 {
+		return b.zg[0], b.zg[1]
+	}
+	if armZoneFix >= 2 && b.grid != nil && !b.grid.reachable(zx, zy) {
+		zx, zy = b.walkableOnCircle(z.NextCenter, zx, zy)
+	}
+	b.zg, b.zgKey = [2]float64{zx, zy}, key
+	return zx, zy
+}
+
+// walkableOnCircle: the main-area cell nearest (zx, zy) around the circle through it about c, or a
+// little inside it (up to 0.6 rad either way). Returns (zx, zy) if there is none.
+func (b *Agent) walkableOnCircle(c []float64, zx, zy float64) (float64, float64) {
+	a0 := math.Atan2(zy-c[1], zx-c[0])
+	r := hyp(zx-c[0], zy-c[1])
+	for k := 0; k <= 24; k++ {
+		a := a0 + float64((k+1)/2)*0.05*float64(1-2*(k%2))
+		for _, rr := range [3]float64{r, r - 6, r - 12} {
+			px, py := c[0]+math.Cos(a)*rr, c[1]+math.Sin(a)*rr
+			if rr > 0 && b.grid.reachable(px, py) {
+				return px, py
+			}
+		}
+	}
+	return zx, zy
+}
+
 // ---------------------------------------------------------------------------
 // Movement
 
@@ -651,7 +735,7 @@ func (b *Agent) goTo(me *Self, tx, ty float64) (float64, float64) {
 		return dir(tx, ty)
 	}
 	if b.route == nil || b.routeGoal == nil || hyp(tx-b.routeGoal[0], ty-b.routeGoal[1]) > 5 ||
-		b.now-b.routeAt > 2.5 {
+		b.now-b.routeAt > navRefresh {
 		b.route = g.route(x, y, tx, ty)
 		b.routeGoal, b.routeAt, b.routeI = &[2]float64{tx, ty}, b.now, 0
 	}
@@ -1087,7 +1171,8 @@ func (b *Agent) dodgeShell(o *Obs) (float64, float64, bool) {
 
 // dodge sidesteps incoming direct-fire projectiles and charging lasers.
 // urgent is true when a laser charge (seen or heard) is aimed at us.
-func (b *Agent) dodge(o *Obs) (dx, dy float64, urgent bool) {
+// (wx, wy) is where we mean to go: a laser sidestep works either way, so it takes that side.
+func (b *Agent) dodge(o *Obs, wx, wy float64) (dx, dy float64, urgent bool) {
 	me := &o.Self
 	cx, cy, cz := me.Pos[0], me.Pos[1], me.Pos[2]+0.56*get(me.Stats, "height", 9)
 	rad := get(me.Stats, "radius", 2.5) + 1.1
@@ -1130,20 +1215,31 @@ func (b *Agent) dodge(o *Obs) (dx, dy float64, urgent bool) {
 		if math.Abs(turn(vec2(m.Aim)[0], a)) > 0.15 {
 			continue
 		}
-		ax += 1.5 * math.Cos(a+b.strafe*(math.Pi/2))
-		ay += 1.5 * math.Sin(a+b.strafe*(math.Pi/2))
+		sx, sy := b.sidestep(a, wx, wy)
+		ax += 1.5 * sx
+		ay += 1.5 * sy
 		urgent = true
 	}
 	if bearing, ok := b.unseenCharge(); ok {
-		a := bearing + math.Pi
-		ax += 1.5 * math.Cos(a+b.strafe*(math.Pi/2))
-		ay += 1.5 * math.Sin(a+b.strafe*(math.Pi/2))
+		sx, sy := b.sidestep(bearing+math.Pi, wx, wy)
+		ax += 1.5 * sx
+		ay += 1.5 * sy
 		urgent = true
 	}
 	if n := hyp(ax, ay); n > 0.01 {
 		return ax / n, ay / n, urgent
 	}
 	return 0, 0, false
+}
+
+// sidestep is the unit perpendicular to bearing a on the strafe side, or with armDodgeAlign the
+// side that agrees with (wx, wy) when we are going somewhere.
+func (b *Agent) sidestep(a, wx, wy float64) (float64, float64) {
+	sx, sy := math.Cos(a+b.strafe*(math.Pi/2)), math.Sin(a+b.strafe*(math.Pi/2))
+	if armDodgeAlign && b.ffaFix() && (wx != 0 || wy != 0) && sx*wx+sy*wy < 0 {
+		sx, sy = -sx, -sy
+	}
+	return sx, sy
 }
 
 // escape handles being stranded off the main walkable area.
@@ -1284,20 +1380,6 @@ func (b *Agent) pickLoot(o *Obs, hpRatio float64, busy bool) *lootPick {
 				if now-n.seen < 12 && hyp(n.pos[0]-x, n.pos[1]-y) < b.P.lootRadius {
 					consider("npc", n.id, n.pos, 85)
 				}
-			}
-		}
-	}
-
-	// Practice only: an uncontested supply drop is 3 cubes plus full HP and energy. Leave for it so we
-	// arrive about when it lands, and skip one another mech is already capturing.
-	if b.pracOn && !busy {
-		walk := get(me.Stats, "walk_speed", 11.7)
-		for _, d := range o.Drops {
-			if len(d.Pos) < 2 || d.Holder != nil && *d.Holder != me.ID {
-				continue
-			}
-			if eta := hyp(d.Pos[0]-x, d.Pos[1]-y) * 1.4 / walk; d.LandsIn <= eta+3 {
-				consider("drop", d.ID, vec3(d.Pos), 300)
 			}
 		}
 	}
@@ -1570,7 +1652,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 			// Outside practice I don't want to commit to someone who's just wandering
 			// nearby — they have to be looking my way or actually coming at me.
 			t.engage = t.dist < b.P.engageDist && (!b.notPractice || facing || t.closing > 1) ||
-				now-t.hitMe < 4 || facing && t.charging && t.dist < 120 ||
+				now-t.hitMe < b.revenge() || facing && t.charging && t.dist < 120 ||
 				t.hp < 350 && t.dist < 120 || o.Alive <= 2
 		} else if t.dist < b.P.engageDist || now-t.hitMe < 6 || endgame {
 			t.engage = true
@@ -1664,7 +1746,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 	}
 
 	// --- movement ------------------------------------------------------------
-	zx, zy := b.zoneGoal(zone, x, y)
+	zx, zy := b.holdZoneGoal(zone, x, y)
 	zd := hyp(zx-x, zy-y)
 	eta := zd*1.45/get(stats, "walk_speed", 11.7) + 4
 	dl := b.zoneDeadline(zone, x, y, 8)
@@ -1806,16 +1888,6 @@ func (b *Agent) decide(o *Obs, act *Action) {
 			} else {
 				mx, my = b.goTo(me, lp.pos[0], lp.pos[1])
 			}
-		case "drop":
-			r := 8.0
-			for _, d := range o.Drops {
-				if d.ID == lp.id && d.Radius > 0 {
-					r = d.Radius
-				}
-			}
-			if hyp(lp.pos[0]-x, lp.pos[1]-y) > r-2.5 {
-				mx, my = b.goTo(me, lp.pos[0], lp.pos[1])
-			}
 		default:
 			mx, my = b.goTo(me, lp.pos[0], lp.pos[1])
 		}
@@ -1850,7 +1922,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 		boost = true
 	}
 	if b.P.dodge && mode != "unstuck" && mode != "escape" {
-		if dx, dy, _ := b.dodge(o); dx != 0 || dy != 0 {
+		if dx, dy, _ := b.dodge(o, mx, my); dx != 0 || dy != 0 {
 			mx, my = 0.4*mx+0.9*dx, 0.4*my+0.9*dy
 			if n := hyp(mx, my); n > 0.01 {
 				mx, my = mx/n, my/n
