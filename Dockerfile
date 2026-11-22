@@ -6,4 +6,4 @@ WORKDIR /bot
 COPY src ./src
 ENV NODE_ENV=production
 USER 65534:65534
-ENTRYPOINT ["node", "--max-old-space-size=320", "/bot/src/main.mjs"]
+ENTRYPOINT ["node", "--max-old-space-size=320", "--expose-gc", "/bot/src/main.mjs"]
