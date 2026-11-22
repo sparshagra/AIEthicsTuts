@@ -121,6 +121,7 @@ type Contact struct {
 	los      bool
 	closing  float64 // closing speed towards us
 	engage   bool
+	laserAt  float64 // when we last saw it fire a laser
 }
 
 func (t *Contact) has(k string) bool {
@@ -315,6 +316,8 @@ type Agent struct {
 	heard []heard
 	mode  string
 
+	ffaBeams int // observations showing a beam from one mech ending on another, far from us
+
 	zg    [2]float64 // held zone goal
 	zgKey [3]float64 // the next circle it was chosen for
 }
@@ -326,6 +329,10 @@ var (
 	armZoneFix    = 2.0
 	armDodgeAlign = true
 	armFFAOnly    = true
+	armAntiLight  = true
+	armLaserCD    = false
+	armBeamFFA    = false
+	armLateT      = 0.0
 	navRefresh    = 2.5
 )
 
@@ -358,6 +365,14 @@ func init() {
 			armDodgeAlign = f != 0
 		case "ffaonly":
 			armFFAOnly = f != 0
+		case "antilight":
+			armAntiLight = f != 0
+		case "lasercd":
+			armLaserCD = f != 0
+		case "beamffa":
+			armBeamFFA = f != 0
+		case "latet":
+			armLateT = f
 		}
 	}
 }
@@ -540,6 +555,7 @@ func (b *Agent) perceive(o *Obs) {
 		}
 	}
 
+	b.readBeams(o)
 	if !b.baseSet {
 		b.base, b.baseSet = b.P, true
 		b.startAlive = o.Alive
@@ -565,10 +581,11 @@ func (b *Agent) perceive(o *Obs) {
 	} else {
 		b.otherDead = 0
 	}
-	if b.otherDead >= 5 {
+	if b.otherDead >= 5 || armBeamFFA && b.ffaBeams >= 2 {
 		b.notPractice = true
 	}
-	prac := b.base.practice && !b.notPractice && now > 20
+	late := armLateT > 0 && (now >= armLateT || o.Zone.NextRadius > 0 && o.Zone.NextRadius <= 72 && now >= 180)
+	prac := b.base.practice && !b.notPractice && now > 20 && !late
 	if prac != b.pracOn {
 		b.pracOn = prac
 		if prac {
@@ -1355,8 +1372,14 @@ func (b *Agent) pickLoot(o *Obs, hpRatio float64, busy bool) *lootPick {
 	if b.early(o) {
 		cr = 150
 	}
+	var light *Weapon
+	for i, w := range me.Weapons {
+		if i < 2 && w != nil && w.Kind == "lightning" {
+			light = w
+		}
+	}
 	for _, c := range b.cubes.values() {
-		if hyp(c.pos[0]-x, c.pos[1]-y) < cr {
+		if hyp(c.pos[0]-x, c.pos[1]-y) < cr && !b.lightGuarded(c.pos, light, me.Energy) {
 			consider("cube", c.id, c.pos, cv)
 		}
 	}
@@ -1714,7 +1737,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 		b.lastThreat = now
 	}
 	strong := tgt != nil && tgt.dist < 120 && (tgt.hp < 200 || tgt.hp < 0.5*me.HP)
-	kite := tgt != nil && tgt.has("laser") && laser == nil && tgt.dist > 55 && hpR < 0.8
+	kite := tgt != nil && tgt.has("laser") && laser == nil && tgt.dist > 55 && hpR < 0.8 && !b.laserSpent(tgt)
 	crowd := b.P.crowdHide && (n >= 3 || n == 2 && hpR < 0.65 || kite)
 	if !b.retreat && (hpR < b.P.retreatHP && now-b.lastThreat < 2 || crowd) {
 		b.retreat, b.coverAt = true, -1
@@ -1787,7 +1810,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 		mx, my = b.goTo(me, zx, zy)
 		boost = !(me.InZone && arrive < dl) && me.Energy > 5
 		mode = "zone"
-	} else if lt := b.lightningThreat(vis, light, endgame); lt != nil {
+	} else if lt := b.lightningThreat(vis, light, endgame, hpR, me.Energy); lt != nil {
 		// A lightning mech is on top of us and we can't answer in kind — peel away.
 		mx, my = b.kiteAway(o, lt)
 		boost = me.Energy > 5
@@ -1855,7 +1878,7 @@ func (b *Agent) decide(o *Obs, act *Action) {
 			}
 			var cp []float64
 			for _, c := range b.cubes.values() {
-				if d := hyp(c.pos[0]-x, c.pos[1]-y); d < r {
+				if d := hyp(c.pos[0]-x, c.pos[1]-y); d < r && !b.lightGuarded(c.pos, light, me.Energy) {
 					r, cp = d, c.pos
 				}
 			}
@@ -2250,20 +2273,102 @@ func (b *Agent) backTo(t *Contact, x, y float64) bool {
 	return math.Abs(turn(math.Atan2(y-t.pos[1], x-t.pos[0]), t.aim[0])) > arc+0.17
 }
 
-// lightningThreat returns the nearest lightning-carrying enemy inside 60 units,
-// but only when we're in a ranked game, hold no lightning ourselves, and it isn't
-// the endgame. Those are the moments getting chained actually hurts.
-func (b *Agent) lightningThreat(foes []*Contact, light *Weapon, endgame bool) *Contact {
-	if !b.notPractice || light != nil || endgame {
+// lightningThreat returns the nearest lightning-carrying enemy we should step out of reach of.
+// Lightning reaches 45 m while our gun reaches 230 m, so standing just outside its range costs us
+// nothing. With armAntiLight this runs in practice too (the squad brings lightning) and keeps a pad
+// beyond the configured range; otherwise only in a ranked game inside 60 m.
+func (b *Agent) lightningThreat(foes []*Contact, light *Weapon, endgame bool, hpR, energy float64) *Contact {
+	if endgame {
+		return nil
+	}
+	if !armAntiLight {
+		if !b.notPractice || light != nil {
+			return nil
+		}
+	} else if light != nil && energy > 18 && hpR >= 0.55 {
 		return nil
 	}
 	var best *Contact
 	for _, t := range foes {
-		if t.seen == b.now && t.has("lightning") && t.dist < 60 && (best == nil || t.dist < best.dist) {
+		if t.seen == b.now && t.has("lightning") && t.dist < b.lightSafe(t) && (best == nil || t.dist < best.dist) {
 			best = t
 		}
 	}
 	return best
+}
+
+// lightSafe is the distance at which t's lightning can no longer reach us.
+func (b *Agent) lightSafe(t *Contact) float64 {
+	if !armAntiLight {
+		return 60
+	}
+	r := get(b.cfg.Weapons["lightning"], "range", 45) + 12
+	if t.cubes >= 6 {
+		r += 6 // it may have the range upgrade
+	}
+	return r
+}
+
+// lightGuarded: a cube at p sits inside the reach of a lightning carrier seen lately, and we cannot
+// answer with lightning of our own.
+func (b *Agent) lightGuarded(p []float64, light *Weapon, energy float64) bool {
+	if !armAntiLight || light != nil && energy > 18 {
+		return false
+	}
+	r := get(b.cfg.Weapons["lightning"], "range", 45) + 8
+	for _, t := range b.tracks.values() {
+		if b.now-t.seen < 4 && t.has("lightning") && hyp(p[0]-t.pos[0], p[1]-t.pos[1]) < r {
+			return true
+		}
+	}
+	return false
+}
+
+// laserSpent: in practice, t fired its laser moments ago and cannot fire again for cooldown + charge,
+// so there is no laser to run from.
+func (b *Agent) laserSpent(t *Contact) bool {
+	if !armLaserCD || !b.pracOn || t.charging || t.laserAt <= 0 {
+		return false
+	}
+	w := b.cfg.Weapons["laser"]
+	return b.now-t.laserAt < get(w, "cooldown", 1.65)+get(w, "charge", 0.75)-0.4
+}
+
+// readBeams notes when each mech fires its laser, and counts beams from one mech that end on another
+// mech well away from us: the house squad never fights itself, so that only happens in a free-for-all.
+func (b *Agent) readBeams(o *Obs) {
+	me := o.Self.Pos
+	seen := false
+	for _, bm := range o.Beams {
+		if bm.By == o.Self.ID || len(bm.Path) < 2 {
+			continue
+		}
+		if t, ok := b.tracks.get(bm.By); ok && bm.Kind == "laser" {
+			t.laserAt = b.now - bm.Age
+		}
+		p0, end := bm.Path[0], bm.Path[len(bm.Path)-1]
+		if len(p0) < 2 || len(end) < 2 || hyp(end[0]-me[0], end[1]-me[1]) < 25 || segDist(me[0], me[1], p0[0], p0[1], end[0], end[1]) < 22 {
+			continue
+		}
+		for _, t := range b.tracks.values() {
+			if t.id != bm.By && b.now-t.seen < 1 && hyp(t.pos[0]-end[0], t.pos[1]-end[1]) < 5 {
+				seen = true
+			}
+		}
+	}
+	if seen {
+		b.ffaBeams++
+	}
+}
+
+func segDist(px, py, ax, ay, bx, by float64) float64 {
+	dx, dy := bx-ax, by-ay
+	l2 := dx*dx + dy*dy
+	t := 0.0
+	if l2 > 0 {
+		t = clamp(((px-ax)*dx+(py-ay)*dy)/l2, 0, 1)
+	}
+	return hyp(px-ax-t*dx, py-ay-t*dy)
 }
 
 // kiteAway walks one 8-unit step away from t. It samples 16 headings and keeps

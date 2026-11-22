@@ -244,6 +244,14 @@ type Sound struct {
 	Age     float64 `json:"age"`
 }
 
+// Beam is a laser beam or lightning arc fired by another mech that we could see.
+type Beam struct {
+	By   int         `json:"by"`
+	Kind string      `json:"kind"`
+	Path [][]float64 `json:"path"`
+	Age  float64     `json:"age"`
+}
+
 // Obs is one observation frame from the server.
 type Obs struct {
 	Type        string  `json:"type"`
@@ -261,6 +269,7 @@ type Obs struct {
 	Offer       *Offer  `json:"offer"`
 	Drops       []Drop  `json:"drops"`
 	Sounds      []Sound `json:"sounds"`
+	Beams       []Beam  `json:"beams"`
 }
 
 // Action is what we send back each tick.
