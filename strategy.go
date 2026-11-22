@@ -232,7 +232,47 @@ func squad(p Tuning) Tuning {
 	p.ghost, p.peek, p.laserFirst = false, false, true
 	p.laserRange, p.lootRadius, p.crateUntil, p.stick = 120, 150, 1e9, 60
 	p.hpw, p.lowBonus, p.maxTarget, p.loseRule = 0.2, 100, 240, true
-	p.fightLoot, p.farmHP, p.laserSeek, p.laserUp = 70, 0.5, 240, true
+	p.fightLoot, p.farmHP, p.laserSeek, p.laserUp = 0, 0.5, 240, true
+	for k, v := range squadOverride {
+		switch k {
+		case "retreatHP":
+			p.retreatHP = v
+		case "recoverHP":
+			p.recoverHP = v
+		case "gunRange":
+			p.gunRange = v
+		case "lightRange":
+			p.lightRange = v
+		case "laserRange":
+			p.laserRange = v
+		case "engageDist":
+			p.engageDist = v
+		case "lootRadius":
+			p.lootRadius = v
+		case "stick":
+			p.stick = v
+		case "hpw":
+			p.hpw = v
+		case "lowBonus":
+			p.lowBonus = v
+		case "maxTarget":
+			p.maxTarget = v
+		case "fightLoot":
+			p.fightLoot = v
+		case "farmHP":
+			p.farmHP = v
+		case "laserSeek":
+			p.laserSeek = v
+		case "loseRule":
+			p.loseRule = v != 0
+		case "crowdHide":
+			p.crowdHide = v != 0
+		case "noMortar":
+			p.noMortar = v != 0
+		case "dodge":
+			p.dodge = v != 0
+		}
+	}
 	return variant(p)
 }
 
@@ -346,6 +386,9 @@ func (b *Agent) revenge() float64 {
 	return 4
 }
 
+// squadOverride: practice squad parameters set by MECH_ARM "sq.<name>=v" (A/B tests only).
+var squadOverride = map[string]float64{}
+
 func init() {
 	for _, kv := range strings.Split(os.Getenv("MECH_ARM"), ",") {
 		k, v, ok := strings.Cut(kv, "=")
@@ -354,6 +397,10 @@ func init() {
 		}
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
+			continue
+		}
+		if name, ok := strings.CutPrefix(k, "sq."); ok {
+			squadOverride[name] = f
 			continue
 		}
 		switch k {
