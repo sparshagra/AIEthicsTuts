@@ -20,7 +20,9 @@ const args = process.argv.slice(2)
 const opt = (k, d) => { const i = args.indexOf("--" + k); return i >= 0 ? args[i + 1] : d }
 const ARENA = opt("arena", process.env.ARENA || "/arena")
 const GAMES = +opt("games", 1)
-const NAME = opt("name", "sparsh")
+// a fresh random name per run, so nothing in a public room points back at us
+const WORDS = ["kestrel", "basalt", "nimbus", "quarry", "lantern", "harrow", "cobalt", "thistle", "ember", "drift", "talon", "marrow"]
+const NAME = opt("name", null) ?? `${WORDS[randomBytes(1)[0] % WORDS.length]}${100 + (randomBytes(2).readUInt16LE() % 900)}`
 const HOST = opt("host", "play.joinbuilders.org")
 const extraEnv = Object.fromEntries(args.flatMap((a, i) => (args[i - 1] === "--env" ? [a.split("=")] : [])))
 let VER = "?"

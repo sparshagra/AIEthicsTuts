@@ -26,6 +26,8 @@ export const P = {
   strafeMin: 0.35,
   strafeMax: 1.0,
   lead: 0.95,
+  leadTau: 0.3, // seconds: bullet flights longer than this lead with the slow velocity average
+  gunFar: 155, // metres: beyond this the gun fires only at slow or nearly dead mechs
   fireTol: 0.9,
   // loot
   lootRadius: 160,

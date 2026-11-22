@@ -80,6 +80,10 @@ export class Brain {
       if (!tr) { tr = { id: m.id, kind: m.kind, first: t, hurtMe: 0, hurtT: -99, hitT: -99, avgV: [m.vel[0], m.vel[1], m.vel[2]], hpHist: [] }; this.tracks.set(m.id, tr) }
       const a = 0.45
       tr.avgV = [tr.avgV[0] * (1 - a) + m.vel[0] * a, tr.avgV[1] * (1 - a) + m.vel[1] * a, tr.avgV[2] * (1 - a) + m.vel[2] * a]
+      // slow average (~1 s): where a strafing mech drifts on the whole, used for long bullet flights
+      const b2 = 0.1
+      tr.avgVL = tr.avgVL ? [tr.avgVL[0] * (1 - b2) + m.vel[0] * b2, tr.avgVL[1] * (1 - b2) + m.vel[1] * b2] : [m.vel[0], m.vel[1]]
+      tr.spd = hyp(m.vel[0], m.vel[1])
       tr.pos = m.pos; tr.vel = m.vel; tr.aim = m.aim; tr.hp = m.hp ?? tr.hp ?? 1400; tr.maxHp = m.max_hp ?? tr.maxHp ?? 1400
       tr.cubes = m.cubes ?? 0; tr.weapons = m.weapons || []; tr.charging = !!m.charging
       if (tr.charging && !tr.chargeT) tr.chargeT = t
@@ -636,7 +640,9 @@ export class Brain {
       if (!useLaser || laser.charge <= 0) {
         let tf = d / spd
         for (let k = 0; k < 3; k++) {
-          px = aimObj.pos[0] + v[0] * tf * P.lead; py = aimObj.pos[1] + v[1] * tf * P.lead
+          const vl = aimObj.avgVL || v, k = Math.exp(-tf / P.leadTau)
+          const vx = vl[0] + (v[0] - vl[0]) * k, vy = vl[1] + (v[1] - vl[1]) * k
+          px = aimObj.pos[0] + vx * tf * P.lead; py = aimObj.pos[1] + vy * tf * P.lead
           pz = aimObj.pos[2] + zc + (aimKind === "mech" ? clamp(v[2], -6, 6) * tf * 0.5 : 0)
           tf = hyp(px - me.pos[0], py - me.pos[1], pz - mz) / spd
         }
@@ -652,7 +658,9 @@ export class Brain {
       const tol = Math.atan2(rad * P.fireTol, Math.max(5, d))
       const line = this.w.clear(me.pos[0], me.pos[1], mz, aimObj.pos[0], aimObj.pos[1], aimObj.pos[2] + zc, rad + 0.5)
       // gun
-      if (gun && line && d <= gun.stats.range - 2 && err < tol && gun.reload === 0 && (gun.ammo ?? 1) > 0) {
+      // past ~150 m a moving mech dodges most bullets: save the magazine unless it is slow or nearly dead
+      const farOk = aimKind !== "mech" || d < P.gunFar || (aimObj.spd ?? 0) < 4 || aimObj.hp < 200
+      if (gun && line && farOk && d <= gun.stats.range - 2 && err < tol && gun.reload === 0 && (gun.ammo ?? 1) > 0) {
         if (aimKind === "mech" || !laser || laser.charge <= 0) act.fire[this.gunSlot] = true
       }
       // laser: hold to charge, let go when full and on target

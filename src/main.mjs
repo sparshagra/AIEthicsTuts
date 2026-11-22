@@ -53,7 +53,7 @@ function warm(h, w) {
 
 function onHello(h) {
   const t0 = performance.now()
-  let name = "sparsh-4141"
+  let name = "rover" // neutral name on the spectator stream
   try {
     const dirs = [h.map?.dir, "/arena", "arena", "../arena"].filter(Boolean)
     let w = null
