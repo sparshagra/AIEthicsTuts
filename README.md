@@ -1,4 +1,4 @@
-# sparshAIEthics
+# AIEthicsTuts
 
 A `mechfight/1` bot by **Sparsh (Team 4141)** for the Builders Buildathon. MIT licensed, see `LICENSE` and `NOTICE`.
 

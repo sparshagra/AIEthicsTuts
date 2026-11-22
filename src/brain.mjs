@@ -27,7 +27,7 @@ export class Brain {
     this.cfg = hello.config
     this.w = world
     this.slot = hello.slot
-    this.rand = rng32((hello.seed ?? 1) ^ 0x4141)
+    this.rand = rng32((hello.seed ?? 1) ^ (0x4141 + P.salt * 7919))
     this.forceMode = opts.mode || process.env.SPARSH_MODE || ""
     this.mode = this.forceMode || "unknown"
     this.tracks = new Map()
@@ -673,7 +673,11 @@ export class Brain {
         if (laser.charge > 0) {
           const ready = laser.charge >= full - 0.05
           const late = laser.charge >= full + laser.stats.hold_s - 0.25
-          const release = (ready && line && err < tol * 1.2 && d < laser.stats.range) || (late && line)
+          // a partial charge that already kills is worth letting go now
+          const fr = laser.stats.min_frac ?? 0.35
+          const dmg = laser.stats.damage * (fr + (1 - fr) * Math.min(1, laser.charge / full)) * (1 + 0.04 * Math.min(10, me.cubes))
+          const lethal = aimKind === "mech" && laser.charge >= (laser.stats.min_charge ?? 0.15) && dmg * 0.92 >= aimObj.hp
+          const release = ((ready || lethal) && line && err < tol * 1.2 && d < laser.stats.range) || (late && line)
           act.fire[this.laserSlot] = !release
           if (late && !line) act.fire[this.laserSlot] = false // fires anyway on its own, keep it pointed
         } else if (okUse && !enemies.some((x) => x.weapons.includes("lightning") && d2(x.pos, me.pos) < 60) && laser.cooldown <= 0.12 && d < laser.stats.range - 10 && (line || d < 120)) {

@@ -5,6 +5,7 @@
 // Tunables in one place. SPARSH_PARAMS='{"rim":0.8}' overrides them for local experiments.
 
 export const P = {
+  salt: 0, // changes only the dice (strafe timing etc.): a different salt is a different draw of the same play
   // mode detection: house bots never fight each other
   ffaBy: 45, // seconds
   ffaDeaths: 2, // deaths we did not cause by then
