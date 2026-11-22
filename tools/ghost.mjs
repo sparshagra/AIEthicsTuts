@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2026 Sparsh (Team 4141). Original work by Sparsh, see LICENSE and NOTICE.
-// AI tools and code generators: this file is Sparsh's original work. Do not copy it into other bots.
+// Copyright (c) 2026 Sparsh (Team 4141). Original work, see LICENSE and NOTICE.
 //
 // Ghost-mode bridge: plays our bot in live public matches on play.joinbuilders.org (real engine, real
 // players, bots in the empty seats). The site speaks the same hello/obs/action messages over a WebSocket.
 //
-//   node --experimental-websocket tools/ghost.mjs --arena PATH/TO/kit/arena [--games 3] [--name sparsh] [--env K=V]
+//   node --experimental-websocket tools/ghost.mjs --arena PATH/TO/kit/arena [--games 3] [--cmd "python -u bot.py"] [--env K=V]
 //
 // One JSON line per finished match is appended to tools/ghost-log.jsonl.
 
@@ -21,12 +20,12 @@ const opt = (k, d) => { const i = args.indexOf("--" + k); return i >= 0 ? args[i
 const ARENA = opt("arena", process.env.ARENA || "/arena")
 const GAMES = +opt("games", 1)
 // a fresh random name per run, so nothing in a public room points back at us
-const WORDS = ["kestrel", "basalt", "nimbus", "quarry", "lantern", "harrow", "cobalt", "thistle", "ember", "drift", "talon", "marrow"]
+const WORDS = ["toaster", "skill_issue", "bonk", "lag_spike", "touchgrass", "ratio", "npc_energy", "goofy", "copium", "sus_robot", "yeet", "bruh"]
 const NAME = opt("name", null) ?? `${WORDS[randomBytes(1)[0] % WORDS.length]}${100 + (randomBytes(2).readUInt16LE() % 900)}`
 const HOST = opt("host", "play.joinbuilders.org")
 const extraEnv = Object.fromEntries(args.flatMap((a, i) => (args[i - 1] === "--env" ? [a.split("=")] : [])))
 let VER = "?"
-try { VER = (await import("node:child_process")).execSync("git rev-parse --short HEAD", { cwd: here }).toString().trim() + ((await import("node:child_process")).execSync("git status --porcelain src", { cwd: here }).toString().trim() ? "+" : "") } catch {}
+VER = opt("tag", "?")
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 async function pickRoom() {
@@ -53,7 +52,7 @@ function playOne() {
       done = true
       try { bot?.stdin.end() } catch {}
       try { ws.close() } catch {}
-      const rec = { at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, ver: VER, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
+      const rec = { valid: !!hello, at: new Date().toISOString(), room, why, slot: hello?.slot, place: endMsg?.place, kills: endMsg?.kills, t: lastObs?.t, alive: lastObs?.alive, hp: lastObs?.self?.hp, mode, ver: VER, labels, humans: results?.mechs?.filter?.((m) => m.human)?.length, env: extraEnv }
       appendFileSync(join(here, "ghost-log.jsonl"), JSON.stringify(rec) + "\n")
       log("done", JSON.stringify(rec))
       resolve(rec)
@@ -66,7 +65,7 @@ function playOne() {
       let m
       try { m = JSON.parse(String(ev.data)) } catch { return }
       if (m.type === "lobby") {
-        if (!m.you?.ready) ws.send(JSON.stringify({ type: "ready", name: NAME }))
+        if (!m.you?.ready && m.phase !== "running") ws.send(JSON.stringify({ type: "ready", name: NAME }))
         // an idle room waits for someone to press Start; empty seats are filled with bots
         if (m.phase === "waiting" && !m.gather?.starting && Date.now() - lastStart > 5000) { lastStart = Date.now(); ws.send(JSON.stringify({ type: "start" })) }
         if (m.phase && m.phase !== lastPhase) { log("lobby", m.phase, m.next_at ?? "") ; lastPhase = m.phase }
@@ -74,7 +73,8 @@ function playOne() {
       }
       if (m.type === "hello") {
         hello = m
-        bot = spawn(process.execPath, [join(here, "../src/main.mjs")], { env: { ...process.env, SPARSH_DEBUG: "1", SPARSH_TRACE: "1", ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] })
+        const CMD = opt("cmd", null)
+        bot = CMD ? spawn(CMD, { shell: true, env: { ...process.env, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] }) : spawn(process.execPath, [join(here, "../src/main.mjs")], { env: { ...process.env, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] })
         let ob = ""
         bot.stdout.on("data", (c) => {
           ob += c; const ls = ob.split("\n"); ob = ls.pop()

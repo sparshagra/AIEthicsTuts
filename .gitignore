@@ -1,5 +1,7 @@
 tools/ghost-log.jsonl
+tools/traces/
+__pycache__/
+*.pyc
 node_modules/
 .DS_Store
 *.log
-tools/traces/
