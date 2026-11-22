@@ -10,12 +10,13 @@ export const P = {
   ffaDeaths: 2, // deaths we did not cause by then
   infightTicks: 3, // observations of a mech losing health to someone else
   // positioning
-  rim: 0.88, // practice: share of the next circle's radius to wait at (the squad roams the middle)
+  rim: 0.9, // board evidence from a public write-up: 0.8 of the radius 6.27, 0.9 6.44, 1.0 6.43 // practice: share of the next circle's radius to wait at (the squad roams the middle)
   ffaRim: 0.8,
-  rimMinR: 150, // below this radius, rim play stops
+  rimMinR: 200,
+  ringNear: 50, // practice: loot inside the ring only this close // below this radius, rim play stops
   zoneSlack: 12, // seconds of margin when leaving for the next circle
   // fighting
-  gunBand: [70, 115],
+  gunBand: [85, 125], // house guns miss past ~80 m; ours hit 56% at 80-120 m (live data)
   laserBand: [110, 175],
   retreatHp: 0.3,
   ffaRetreatHp: 0.5,
@@ -37,8 +38,9 @@ export const P = {
   dropRadius: 220,
   sneak: true,
   maxExpand: 30000,
+  faceHit: false, // practice: turning to an unseen attacker's bearing scored worse on the board in a public write-up
   upgrades: {
-    armor: 10, plating: 9.6, laser_damage: 9.2, laser_charge: 9, gun_damage: 8, gun_rate: 7.8, nanites: 7.4, gun_mag: 7,
+    plating: 10, armor: 9.8, gun_mag: 9.4, laser_damage: 9.3, laser_charge: 9, gun_damage: 8, gun_rate: 7.8, nanites: 7.4,
     gyros: 6, servos: 5.6, gun_velocity: 5.4, sensors: 5, laser_pierce: 4.5, capacitor: 4, reactor: 3.8, jets: 3.5,
     lightning_efficiency: 3.2, lightning_range: 3.1, lightning_chain: 3, mortar_reload: 1, mortar_velocity: 1, mortar_splash: 1,
   },

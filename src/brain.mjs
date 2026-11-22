@@ -66,7 +66,7 @@ export class Brain {
         if (ev.by != null && ev.bearing != null) {
           const tr = this.tracks.get(ev.by)
           if (tr) { tr.hurtMe += ev.amount; tr.hurtT = t }
-          else if (!o.mechs.some((m) => m.id === ev.by)) { this.lookAt = ev.bearing; this.lookUntil = t + 1.4 }
+          else if (!o.mechs.some((m) => m.id === ev.by) && (P.faceHit || this.ffa || ev.by >= 100)) { this.lookAt = ev.bearing; this.lookUntil = t + 1.4 }
         }
       } else if (ev.type === "hit") { this.dealtT = t; if (ev.weapon === "gun" && ev.target < 16) this.gunHits = (this.gunHits || 0) + 1; if (ev.weapon === "laser" && ev.target < 16) this.laserHits = (this.laserHits || 0) + 1; this.dealtLog = (this.dealtLog || "") + `${ev.weapon[0]}${ev.target >= 1000 ? "c" : ev.target >= 100 ? "n" : ""}${ev.amount | 0},`; const tr = this.tracks.get(ev.target); if (tr) tr.hitT = t }
       else if (ev.type === "took" || ev.type === "take_failed") this.items.delete(ev.id)
@@ -531,6 +531,9 @@ export class Brain {
       if (d > P.lootRadius * (v >= 10 ? 1.6 : 1)) continue
       if (this.safeFor(it.pos, 10) < d / this.walkSpeed() + 8) continue
       if (d2(it.pos, zn.c) > zn.r - 10) continue
+      // practice: the squad roams the middle, so loot inside the ring is worth it only close by
+      const zr = this.o.zone.next_radius
+      if (!this.ffa && zr >= P.rimMinR && d2(it.pos, this.o.zone.next_center) < zr * P.rim * 0.9 && d > P.ringNear) continue
       const rise = it.pos[2] - this.w.ground(it.pos[0], it.pos[1])
       if (rise > P.maxRoof) continue
       let s = v * 100 / (d + 30 + Math.max(0, rise) * 1.5)
